@@ -1,0 +1,62 @@
+[
+  {
+    "id": "webapp",
+    "description": "Frontend React web application",
+    "path": "~/repos/webapp",
+    "language": "typescript",
+    "framework": "react",
+    "packageManager": "yarn",
+    "scripts": {
+      "testUnit": "yarn run test:unit",
+      "testIntegration": "yarn run test:integration",
+      "lint": "yarn run lint",
+      "build": "yarn run build",
+      "format": "yarn run format"
+    }
+  },
+  {
+    "id": "be-api-nodejs",
+    "description": "Backend Node.js API service",
+    "path": "~/repos/be-api-nodejs",
+    "language": "typescript",
+    "framework": "nodejs",
+    "packageManager": "yarn",
+    "scripts": {
+      "testUnit": "yarn run test:unit",
+      "testIntegration": "yarn run test:integration",
+      "lint": "yarn run lint",
+      "build": "yarn run build",
+      "format": "yarn run format"
+    }
+  },
+  {
+    "id": "be-api-python",
+    "description": "Backend Python API service",
+    "path": "~/repos/be-api-python",
+    "language": "python",
+    "framework": "fastapi",
+    "packageManager": "uv",
+    "scripts": {
+      "testUnit": "uv run pytest -q tests/unit",
+      "testIntegration": "uv run pytest -q tests/integration",
+      "lint": "uv run ruff check .",
+      "build": "",
+      "format": "uv run black ."
+    }
+  },
+  {
+    "id": "be-api-dotnet",
+    "description": "Backend .NET API service",
+    "path": "~/repos/be-api-dotnet",
+    "language": "csharp",
+    "framework": "dotnet",
+    "packageManager": "dotnet",
+    "scripts": {
+      "testUnit": "dotnet test --filter Category=Unit",
+      "testIntegration": "dotnet test --filter Category=Integration",
+      "lint": "dotnet format",
+      "build": "dotnet build",
+      "format": "dotnet format"
+    }
+  }
+]

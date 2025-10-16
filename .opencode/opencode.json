@@ -1,0 +1,12 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "instructions": [
+        ".opencode/context/AGENTIC_FLOW.md",
+    ],
+    "model": "github/claude-4.5-preview",
+    "small_model": "github/gpt-5-mini",
+    "permission": {
+        "edit": "ask",
+        "bash": "ask"
+    }
+}

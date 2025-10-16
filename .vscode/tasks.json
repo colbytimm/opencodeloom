@@ -1,0 +1,89 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run integration tests",
+			"type": "shell",
+			"command": "npm run -s test:integration",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run integration tests after consolidation",
+			"type": "shell",
+			"command": "npm run -s test:integration",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run single integration test",
+			"type": "shell",
+			"command": "vitest run tests/integration/db-only-flow.int.test.ts",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run integration tests (single)",
+			"type": "shell",
+			"command": "npm run -s test:integration",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run integration tests focusing on db-only",
+			"type": "shell",
+			"command": "npm run -s test:integration",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run integration tests after rebuild",
+			"type": "shell",
+			"command": "npm run -s test:integration",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run integration tests final",
+			"type": "shell",
+			"command": "npm run -s test:integration",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run tests after pruning integration files",
+			"type": "shell",
+			"command": "npm run -s test:integration",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "List integration tests to confirm only one remains",
+			"type": "shell",
+			"command": "ls -1 tests/integration",
+			"group": "build"
+		},
+		{
+			"label": "List integration tests (final)",
+			"type": "shell",
+			"command": "ls -l tests/integration",
+			"group": "build"
+		}
+	]
+}

@@ -1,0 +1,4 @@
+{
+  "__comment": "Optional mapping of logical repo names to local paths. Tests and default flows do not require this file.",
+  "example-repo": ".."
+}
