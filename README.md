@@ -18,9 +18,14 @@ Lightweight, local-first orchestration for issues that the agent breaks into tas
 
 - Open this repository in OpenCode.
 
+- Draft the issue
+
+  - Run `/draft-issue` to be guided through problem, acceptance criteria, optional repo tags, constraints, and risks.
+  - It validates repo tags and prepares `ISSUE.md` content plus a small JSON block for `/kickoff`.
+
 - Generate or update a task graph
 
-  - Write or paste your issue (problem statement) and acceptance criteria in the OpenCode issue context. Optionally tag repos.
+  - If you didn’t use `/draft-issue`, write your issue and acceptance criteria in the OpenCode issue context (optionally tag repos).
   - Run `/kickoff`. The agent will produce the task graph automatically and persist it under `issues/<ISSUE_ID>/task-graph.json`.
 
 - Work the tasks
