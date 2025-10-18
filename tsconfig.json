@@ -9,11 +9,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["node"],
+    "types": ["node", "bun"],
     "typeRoots": ["./node_modules/@types"],
     "baseUrl": "."
   },
   "include": [
+    ".opencode/lib/**/*.ts",
     ".opencode/tool/**/*.ts",
     ".opencode/plugin/**/*.ts",
     "types/**/*.d.ts"

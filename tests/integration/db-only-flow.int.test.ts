@@ -62,18 +62,18 @@ describe('Integration: DB-only orchestrator + graph state', () => {
 
     // Complete T1 first; T3 still blocked until T2 finishes
     const payload1 = JSON.parse(c1.task.payload_json);
-    const done1 = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, c1.task.id, true, undefined, payload1.id);
+    const done1 = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, 'impl-1', c1.task.id, true, undefined, payload1.id);
     expect(done1.ok).toBe(true);
 
     // Finish T2; T3 should now enqueue and be claimable
     const payload2 = JSON.parse(c2.task.payload_json);
-    const done2 = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, c2.task.id, true, undefined, payload2.id);
+    const done2 = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, 'impl-2', c2.task.id, true, undefined, payload2.id);
     expect(done2.ok).toBe(true);
 
     const c3: any = await Orchestrator.claimNextTaskForAgent(root, issueId, dbPath, 'impl-3');
     expect(c3.ok).toBe(true); expect(c3.task).toBeTruthy();
     const payload3 = JSON.parse(c3.task.payload_json);
-    const done3 = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, c3.task.id, true, undefined, payload3.id);
+    const done3 = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, 'impl-3', c3.task.id, true, undefined, payload3.id);
     expect(done3.ok).toBe(true);
 
     // Verify final states all done
@@ -89,5 +89,79 @@ describe('Integration: DB-only orchestrator + graph state', () => {
     expect(audit).toContain('"event":"bootstrap"');
     expect(audit).toContain('"event":"claim"');
     expect(audit).toContain('"event":"complete"');
+  });
+
+  it('blocks completion until all expected agents check off', async () => {
+    const issueId = 'ISSUE-AGENTS';
+    const dbPath = path.join(root, 'agents.db');
+
+    await mkdir(path.join(root, 'issues', issueId), { recursive: true });
+    await writeFile(path.join(root, 'issues', issueId, 'task-graph.json'), JSON.stringify({
+      version: 'v1',
+      tasks: [
+        { id: 'T1', title: 'paired task', agents: ['impl-1', 'impl-2'] },
+      ],
+    }, null, 2));
+
+    await mkdir(path.join(root, '.opencode', 'state'), { recursive: true });
+
+    const boot = await Orchestrator.bootstrapIssueQueue(root, issueId, dbPath);
+    expect(boot.enqueued).toBe(1);
+
+    const claim: any = await Orchestrator.claimNextTaskForAgent(root, issueId, dbPath, 'impl-1');
+    expect(claim.ok).toBe(true); expect(claim.task).toBeTruthy();
+    const payload = JSON.parse(claim.task.payload_json);
+
+    const firstComplete = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, 'impl-1', claim.task.id, true, undefined, payload.id);
+    expect(firstComplete.ok).toBe(false);
+    expect(firstComplete.blocked).toBe(true);
+    expect(firstComplete.outstanding_agents).toContain('impl-2');
+
+    const list = JSON.parse(await getExec(Graph.listgraph)({ dbPath, issue_id: issueId }));
+    expect(list.tasks.find((t: any) => t.id === 'T1').state).toBe('in_progress');
+
+    const secondComplete = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, 'impl-2', claim.task.id, true, undefined, payload.id);
+    expect(secondComplete.ok).toBe(true);
+
+    const listFinal = JSON.parse(await getExec(Graph.listgraph)({ dbPath, issue_id: issueId }));
+    expect(listFinal.tasks.find((t: any) => t.id === 'T1').state).toBe('done');
+  });
+
+  it('adds code-quality agent before reviewer and enforces ordering', async () => {
+    const issueId = 'ISSUE-REVIEW-FLOW';
+    const dbPath = path.join(root, 'review.db');
+
+    await mkdir(path.join(root, 'issues', issueId), { recursive: true });
+    await writeFile(path.join(root, 'issues', issueId, 'task-graph.json'), JSON.stringify({
+      version: 'v1',
+      tasks: [
+        { id: 'TQ', title: 'needs review', agents: ['reviewer'] },
+      ],
+    }, null, 2));
+
+    await mkdir(path.join(root, '.opencode', 'state'), { recursive: true });
+
+    const boot = await Orchestrator.bootstrapIssueQueue(root, issueId, dbPath);
+    expect(boot.enqueued).toBe(1);
+
+    const listBefore = JSON.parse(await getExec(Graph.listgraph)({ dbPath, issue_id: issueId }));
+    const taskInfo = listBefore.tasks.find((t: any) => t.id === 'TQ');
+    expect(taskInfo.agents).toEqual(['code-quality', 'reviewer']);
+
+    const claim: any = await Orchestrator.claimNextTaskForAgent(root, issueId, dbPath, 'code-quality');
+    expect(claim.ok).toBe(true); expect(claim.task).toBeTruthy();
+    const payload = JSON.parse(claim.task.payload_json);
+    expect(payload.agents).toEqual(['code-quality', 'reviewer']);
+
+    const reviewerAttempt = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, 'reviewer', claim.task.id, true, undefined, payload.id);
+    expect(reviewerAttempt.ok).toBe(false);
+    expect(reviewerAttempt.blocked).toBe(true);
+    expect(reviewerAttempt.outstanding_agents).toEqual(['code-quality']);
+
+    const codeQualityComplete = await Orchestrator.completeTaskForAgent(root, issueId, dbPath, 'code-quality', claim.task.id, true, undefined, payload.id);
+    expect(codeQualityComplete.ok).toBe(true);
+
+    const listAfter = JSON.parse(await getExec(Graph.listgraph)({ dbPath, issue_id: issueId }));
+    expect(listAfter.tasks.find((t: any) => t.id === 'TQ').state).toBe('done');
   });
 });

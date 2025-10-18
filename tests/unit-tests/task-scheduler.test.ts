@@ -6,7 +6,7 @@ const mkdir = vi.fn();
 const access = vi.fn();
 vi.mock('fs/promises', () => ({ readFile, writeFile, mkdir, access }));
 
-const mod: any = await import(new URL('../../.opencode/plugin/task-scheduler.ts', import.meta.url).href);
+const mod: any = await import(new URL('../../.opencode/lib/task-scheduler.ts', import.meta.url).href);
 
 describe('task-scheduler (unit)', () => {
   beforeEach(() => {

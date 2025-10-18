@@ -85,11 +85,14 @@ flowchart TD
   LINT --> S
   S -- Vulnerability found --> IMP
 
+  CQ[CodeQualityAgent]
   R[ReviewerAgent]
-  Q1 --> R
-  Q2 --> R
-  Q3 --> R
-  S --> R
+  Q1 --> CQ
+  Q2 --> CQ
+  Q3 --> CQ
+  S --> CQ
+  LINT --> CQ
+  CQ --> R
   R -- Requests changes --> IMP
 
   R -- Approved --> MR[Open PR]
@@ -104,4 +107,5 @@ Notes
 - Tasks carry explicit dependency tags so agents can auto-pick up when dependencies complete.
 - Worktree tool creates branches with `issue-<id>/feature-<slug>` and pulls latest `main` by default.
 - Security runs both pre-PR and on PR using Semgrep and OSV-Scanner (via local runner or CI of your choice).
+- Code Quality agent runs before Reviewer to enforce linting and repository patterns.
 - Reviewer is an agent; merge strategy is squash.

@@ -1,7 +1,7 @@
-import { loadTaskGraph, TaskNode } from './task-scheduler.js';
+import { loadTaskGraph, TaskNode } from '../lib/task-scheduler.js';
 import { mkdir, appendFile, readFile, writeFile, access } from 'fs/promises';
 import path from 'path';
-import { inittasksdb, createtask, claimnexttask, marktaskdone, marktaskfailed, listtasks } from '../tool/task-queue-tool.js';
+import { inittasksdb, createtask, claimnexttask, marktaskdone, marktaskfailed, listtasks, checkofftask, listtaskchecks } from '../tool/task-queue-tool.js';
 import { initgraphtables, importgraph, computeready, setgraphstate, listgraph } from '../tool/graph-db-tool.js';
 import { createworktree } from '../tool/worktree-tool.js';
 
@@ -63,6 +63,32 @@ async function prepareWorktreesForTask(rootDir: string, t: TaskNode) {
   return { prepared };
 }
 
+function normalizeAgentsList(input: any): string[] {
+  const raw = Array.isArray(input) ? input : [];
+  const cleaned: string[] = [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    if (!seen.has(trimmed)) {
+      cleaned.push(trimmed);
+      seen.add(trimmed);
+    }
+  }
+  const reviewerIndex = cleaned.indexOf('reviewer');
+  if (reviewerIndex >= 0) {
+    const codeQualityIndex = cleaned.indexOf('code-quality');
+    if (codeQualityIndex === -1) {
+      cleaned.splice(reviewerIndex, 0, 'code-quality');
+    } else if (codeQualityIndex > reviewerIndex) {
+      cleaned.splice(codeQualityIndex, 1);
+      cleaned.splice(reviewerIndex, 0, 'code-quality');
+    }
+  }
+  return cleaned;
+}
+
 type Limits = { [agent_id: string]: number };
 type RetryPolicy = { maxAttemptsPerTask?: number };
 type Retries = { [graphId: string]: number };
@@ -99,34 +125,48 @@ async function saveRetries(rootDir: string, retries: Retries) {
 }
 
 export async function bootstrapIssueQueue(rootDir: string, issueId: string, dbPath = '.opencode/state/tasks.db') {
+  const actualRootDir = typeof rootDir === 'string' ? rootDir : (rootDir as any)?.directory || process.cwd();
+
+  // Guard against invalid plugin loading calls
+  if (!issueId || typeof issueId !== 'string') {
+    console.warn('bootstrapIssueQueue called with invalid parameters during plugin loading - skipping');
+    return { enqueued: 0 };
+  }
+
   await withRetry(() => callTool(inittasksdb, { dbPath }));
   await withRetry(() => callTool(initgraphtables, { dbPath }));
-  // Import graph JSON into DB
-  const graph = await loadTaskGraph(rootDir, issueId);
+  const graph = await loadTaskGraph(actualRootDir, issueId);
   await withRetry(() => callTool(importgraph, { dbPath, issue_id: issueId, graph_json: JSON.stringify(graph) }));
-  // Determine initial ready tasks deterministically from in-memory graph (roots: no deps)
   let tasks: TaskNode[] = Array.isArray(graph?.tasks)
     ? (graph.tasks.filter((t: any) => !t.deps || t.deps.length === 0) as TaskNode[])
     : [];
   for (const t of tasks) {
-    await withRetry(() => callTool(createtask, { dbPath, title: t.title || t.id, payload_json: JSON.stringify(t), priority: '100' }));
+    const expectedAgents = normalizeAgentsList((t as any).agents);
+    const payload = { ...t, agents: expectedAgents };
+    await withRetry(() => callTool(createtask, {
+      dbPath,
+      title: t.title || t.id,
+      payload_json: JSON.stringify(payload),
+      priority: '100',
+      expected_agents_json: JSON.stringify(expectedAgents)
+    }));
     await withRetry(() => callTool(setgraphstate, { dbPath, issue_id: issueId, task_id: t.id, state: 'queued' }));
-    // optional multi-repo prep
-    await prepareWorktreesForTask(rootDir, t).catch(() => {});
+    await prepareWorktreesForTask(actualRootDir, t).catch(() => {});
   }
   const enqueued = tasks.length;
-  await appendAudit(rootDir, issueId, { event: 'bootstrap', enqueued });
+  await appendAudit(actualRootDir, issueId, { event: 'bootstrap', enqueued });
   return { enqueued };
 }
 
 export async function claimNextTaskForAgent(rootDir: string, issueId: string, dbPath: string, agent_id: string) {
-  // Enforce optional per-agent concurrency limits using task DB
-  const limits = await loadLimits(rootDir);
+  const actualRootDir = typeof rootDir === 'string' ? rootDir : (rootDir as any)?.directory || process.cwd();
+
+  const limits = await loadLimits(actualRootDir);
   const max = limits[agent_id];
   if (typeof max === 'number') {
     const current = await getAgentInProgressCount(dbPath, agent_id);
     if (current >= max) {
-      await appendAudit(rootDir, issueId, { event: 'claim-skip-capacity', agent_id, current, max });
+      await appendAudit(actualRootDir, issueId, { event: 'claim-skip-capacity', agent_id, current, max });
       return { ok: true, task: null, reason: 'at-capacity' };
     }
   }
@@ -139,11 +179,11 @@ export async function claimNextTaskForAgent(rootDir: string, issueId: string, db
       const payload = JSON.parse(task.payload_json || '{}');
       const graphId = payload.id ?? String(task.id);
       await withRetry(() => callTool(setgraphstate, { dbPath, issue_id: issueId, task_id: graphId, state: 'in_progress' }));
-      await appendAudit(rootDir, issueId, { event: 'claim', agent_id, dbTaskId: task.id, graphId });
+      await appendAudit(actualRootDir, issueId, { event: 'claim', agent_id, dbTaskId: task.id, graphId });
     } catch {
       const sid = String(task.id);
       await withRetry(() => callTool(setgraphstate, { dbPath, issue_id: issueId, task_id: sid, state: 'in_progress' }));
-      await appendAudit(rootDir, issueId, { event: 'claim', agent_id, dbTaskId: task.id, graphId: sid });
+      await appendAudit(actualRootDir, issueId, { event: 'claim', agent_id, dbTaskId: task.id, graphId: sid });
     }
   }
   return res;
@@ -153,11 +193,50 @@ export async function completeTaskForAgent(
   rootDir: string,
   issueId: string,
   dbPath: string,
+  agent_id: string | undefined,
   dbTaskId: number | string,
   ok = true,
   error_text?: string,
   payloadGraphId?: string,
 ) {
+  // Defensive check: ensure rootDir is a string, extract from context if needed
+  const actualRootDir = typeof rootDir === 'string' ? rootDir : (rootDir as any)?.directory || process.cwd();
+
+  const taskIdNumeric = Number(dbTaskId);
+  if (ok && agent_id) {
+    await withRetry(() => callTool(checkofftask, { dbPath, task_id: String(taskIdNumeric), agent_id }));
+  }
+
+  let outstandingAgents: string[] = [];
+  if (ok) {
+    const lg: any = await withRetry(() => callTool(listgraph, { dbPath, issue_id: issueId }));
+    const taskNode = lg?.ok ? (lg.tasks as any[]).find(t => t.id === (payloadGraphId ?? String(dbTaskId))) : undefined;
+    const expectedAgents: string[] = normalizeAgentsList(taskNode?.agents);
+    if (expectedAgents.length > 0) {
+      const checksRes: any = await withRetry(() => callTool(listtaskchecks, { dbPath, task_id: String(taskIdNumeric) }));
+      const doneAgents = new Set(
+        Array.isArray(checksRes?.checks)
+          ? checksRes.checks.filter((c: any) => c?.status === 'done').map((c: any) => c.agent_id)
+          : []
+      );
+      outstandingAgents = expectedAgents.filter(agent => !doneAgents.has(agent));
+      if (outstandingAgents.length > 0) {
+        await appendAudit(actualRootDir, issueId, {
+          event: 'complete-blocked',
+          dbTaskId,
+          graphId: payloadGraphId ?? String(dbTaskId),
+          agent_id,
+          outstanding_agents: outstandingAgents,
+        });
+        return {
+          ok: false,
+          blocked: true,
+          outstanding_agents: outstandingAgents,
+        };
+      }
+    }
+  }
+
   const toolRes: any = ok
     ? await withRetry(() => callTool(marktaskdone, { dbPath, id: String(dbTaskId) }))
     : await withRetry(() => callTool(marktaskfailed, { dbPath, id: String(dbTaskId), error_text: error_text ?? 'error' }));
@@ -165,13 +244,13 @@ export async function completeTaskForAgent(
   const graphId = payloadGraphId ?? String(dbTaskId);
   let retried = false;
   if (!ok) {
-    const policy = await loadRetryPolicy(rootDir);
+    const policy = await loadRetryPolicy(actualRootDir);
     const max = policy.maxAttemptsPerTask ?? 0;
     if (max > 0) {
-      const counts = await loadRetries(rootDir);
+      const counts = await loadRetries(actualRootDir);
       const next = (counts[graphId] ?? 0) + 1;
       counts[graphId] = next;
-      await saveRetries(rootDir, counts);
+      await saveRetries(actualRootDir, counts);
       if (next <= max) {
         // Re-enqueue task instead of marking failed
         // Pull details from DB listgraph instead of file
@@ -181,28 +260,36 @@ export async function completeTaskForAgent(
           await withRetry(() => callTool(createtask, { dbPath, title: taskNode.title || taskNode.id, payload_json: JSON.stringify(taskNode), priority: '100' }));
           await withRetry(() => callTool(setgraphstate, { dbPath, issue_id: issueId, task_id: graphId, state: 'queued' }));
           retried = true;
-          await appendAudit(rootDir, issueId, { event: 'retry-enqueue', graphId, attempt: next, max });
+          await appendAudit(actualRootDir, issueId, { event: 'retry-enqueue', graphId, attempt: next, max });
         }
       }
     }
   }
   if (ok) await withRetry(() => callTool(setgraphstate, { dbPath, issue_id: issueId, task_id: graphId, state: 'done' }));
   else if (!retried) await withRetry(() => callTool(setgraphstate, { dbPath, issue_id: issueId, task_id: graphId, state: 'failed' }));
-  await appendAudit(rootDir, issueId, { event: 'complete', ok, dbTaskId, graphId, retried, error_text: ok ? undefined : error_text });
+  await appendAudit(actualRootDir, issueId, { event: 'complete', ok, dbTaskId, graphId, retried, error_text: ok ? undefined : error_text });
   // No file-based claims tracking needed; SQLite reflects current in_progress
 
   if (ok) {
     const readyRes: any = await withRetry(() => callTool(computeready, { dbPath, issue_id: issueId }));
     const tasks: TaskNode[] = readyRes.ok ? readyRes.tasks : [];
     for (const t of tasks) {
-      await withRetry(() => callTool(createtask, { dbPath, title: t.title || t.id, payload_json: JSON.stringify(t), priority: '100' }));
+      const expectedAgents = normalizeAgentsList((t as any).agents);
+      const payload = { ...t, agents: expectedAgents };
+      await withRetry(() => callTool(createtask, {
+        dbPath,
+        title: t.title || t.id,
+        payload_json: JSON.stringify(payload),
+        priority: '100',
+        expected_agents_json: JSON.stringify(expectedAgents)
+      }));
       await withRetry(() => callTool(setgraphstate, { dbPath, issue_id: issueId, task_id: t.id, state: 'queued' }));
     }
   }
   return toolRes;
 }
 
-export const WorkflowOrchestrator = async ({ $, project, directory, worktree }: Context) => {
+export const WorkflowOrchestrator = async ({ $, project, directory, worktree }) => {
   return {
     async event({ event }: { event: EventPayload }) {
       if (event.type === "session.idle") {
