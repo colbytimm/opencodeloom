@@ -33,7 +33,7 @@ Lightweight, local-first orchestration for issues that the agent breaks into tas
   - Run `/implement` to implement the next ready task for the issue.
   - Or `/implement all` to run tasks sequentially until complete (or a failure).
   - Optionally `/implement <TASK_ID>` to target a specific task.
-  - Use `/review` for code review and `/retest` to re-run tests.
+  - Use `/review` for code review and `/retest` to re-run tests. Any task that requires a reviewer will first flow through a Code Quality subagent that checks linting and repository patterns before the Reviewer delivers feedback.
 
 - Ship it
 
@@ -87,4 +87,5 @@ Then run `/kickoff`. The agent creates the task graph for you.
 ## Notes
 
 - Multi-repo worktrees are created only when `repo_paths` is set and a path exists in `repos.json`.
+- Reviewer handoffs now require a code-quality checkoff; reviewer feedback is only requested after lint/pattern issues are cleared.
 - No CI is required; everything runs locally.
